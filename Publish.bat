@@ -1,0 +1,1 @@
+dotnet publish VhdSync.csproj -r win7-x64 --framework net6.0 -c Release --self-contained /p:PublishSingleFile=true
