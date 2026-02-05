@@ -7,7 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DiskAccessLibrary" Version="1.6.3" />
+    <PackageReference Include="DiskAccessLibrary" Version="1.6.6" />
   </ItemGroup>
 
 </Project>
