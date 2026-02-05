@@ -26,17 +26,30 @@ namespace VhdSync
 
         static void Main(string[] args)
         {
-            if (args.Length < 2 || args.Length > 2)
+            if (args.Length < 2 || args.Length > 3 || (args.Length == 3 && args[2] != "-force"))
             {
                 Console.WriteLine("Usage:");
-                Console.WriteLine("VhdSync <SourceFilePath> <TargetFilePath>");
+                Console.WriteLine("VhdSync <SourceFilePath> <TargetFilePath> [-force]");
                 return;
             }
 
             ThreadPool.SetMinThreads(s_maxDegressOfParallelism, s_maxDegressOfParallelism);
             string source = args[0];
             string target = args[1];
+            bool force = args.Length > 2;
             uint flags = unchecked((uint)(FILE_FLAG_NO_BUFFERING | FileOptions.WriteThrough | FILE_FLAG_OVERLAPPED));
+
+            if (force)
+            {
+                // Calling AdjustTokenPrivileges and then immediately calling SetFileValidData will sometimes result in ERROR_PRIVILEGE_NOT_HELD.
+                // We can work around the issue by obtaining the privilege before obtaining the handle.
+                bool hasManageVolumePrivilege = SecurityUtils.ObtainManageVolumePrivilege();
+                if (!hasManageVolumePrivilege)
+                {
+                    Console.WriteLine("Error: Failed to obtain SeManageVolumePrivilege");
+                    return;
+                }
+            }
             SafeFileHandle sourceFileHandle = HandleUtils.GetFileHandle(source, FileAccess.Read, ShareMode.Read, flags);
             SafeFileHandle targetFileHandle = HandleUtils.GetFileHandle(target, FileAccess.ReadWrite, ShareMode.Read, flags);
             if (sourceFileHandle.IsInvalid)
@@ -56,7 +69,7 @@ namespace VhdSync
             List<long> blocksToSync = null;
             Thread workerThread = new Thread(() =>
             {
-                blocksToSync = Syncrhonize(sourceStream, targetStream);
+                blocksToSync = Syncrhonize(sourceStream, targetStream, force);
             });
 
             workerThread.Start();
@@ -96,13 +109,30 @@ namespace VhdSync
             }
         }
 
-        private static List<long> Syncrhonize(FileStreamEx sourceStream, FileStreamEx targetStream)
+        private static List<long> Syncrhonize(FileStreamEx sourceStream, FileStreamEx targetStream, bool force)
         {
             s_streamLength = sourceStream.Length;
             if (targetStream.Length != s_streamLength)
             {
-                Console.WriteLine("Error: Source file length does not match target file length");
-                return null;
+                if (!force)
+                {
+                    Console.WriteLine("Error: Source file length does not match target file length");
+                    return null;
+                }
+                else
+                {
+                    Console.WriteLine($"Setting target file size to {s_streamLength} bytes");
+                    try
+                    {
+                        targetStream.SetLength(s_streamLength);
+                        targetStream.SetValidLength(s_streamLength);
+                    }
+                    catch (Exception)
+                    {
+                        Console.WriteLine("Error: failed to set target file length");
+                        return null;
+                    }
+                }
             }
 
             List<long> blocksToSync = new List<long>();
